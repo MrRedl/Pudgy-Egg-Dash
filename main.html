@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Penguin Catcher</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        background: #f0f0f0;
+        user-select: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+      }
+      #gameContainer {
+        aspect-ratio: 2 / 3;
+        max-width: 500px;
+        width: 100%;
+        height: auto;
+        position: relative;
+      }
+      #canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  </head>
+  <body>
+    <div id="gameContainer">
+      <canvas id="canvas"></canvas>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/@farcade/game-sdk@0.2.1/dist/index.min.js"></script>
+    <script>
+      let canvas, ctx, width, height, dpr;
+      let gameContainer;
+      let score = 0,
+        lives = 3,
+        streak = 0,
+        missCount = 0;
+      let items = [],
+        particles = [];
+      let currentQuadrant = 0; // Start at top-left
+      let basketX, basketY, px, py;
+      let glow = false;
+      let shakeX = 0,
+        shakeY = 0,
+        shakeTimer = 0;
+      let audioMuted = false;
+      let audioCtx;
+      let spawnTimer = 0;
+
+      function init() {
+        canvas = document.getElementById("canvas");
+        ctx = canvas.getContext("2d");
+        gameContainer = document.getElementById("gameContainer");
+        dpr = window.devicePixelRatio || 1;
+        window.addEventListener("resize", resize);
+        window.addEventListener("orientationchange", () => setTimeout(resize, 100));
+        canvas.addEventListener("touchstart", handleTouch, { passive: false });
+        document.addEventListener("keydown", handleKey);
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        resize();
+        px = width / 2;
+        py = height * 0.6;
+        updateBasketPos();
+        window.FarcadeSDK.on("play_again", restart);
+        window.FarcadeSDK.on("toggle_mute", ({ isMuted }) => {
+          audioMuted = isMuted;
+        });
+        window.FarcadeSDK.singlePlayer.actions.ready();
+        loop();
+      }
+
+      function resize() {
+        const rect = gameContainer.getBoundingClientRect();
+        const cw = rect.width;
+        const ch = rect.height;
+        canvas.width = cw * dpr;
+        canvas.height = ch * dpr;
+        canvas.style.width = cw + "px";
+        canvas.style.height = ch + "px";
+        ctx.scale(dpr, dpr);
+        width = cw;
+        height = ch;
+        px = width / 2;
+        py = height * 0.6;
+        updateBasketPos();
+      }
+
+      function updateBasketPos() {
+        // Позиции корзины (по бокам, над/под центром)
+        const offsets = [
+            { dx: -100, dy: -60 }, // Левая верхняя
+            { dx: -100, dy: 60 },  // Левая нижняя
+            { dx: 100, dy: -60 },  // Правая верхняя
+            { dx: 100, dy: 60 },   // Правая нижняя
+        ];
+        const off = offsets[currentQuadrant];
+        basketX = px + off.dx;
+        basketY = py + off.dy;
+        }
+
+      function setQuadrant(q) {
+        if (q !== currentQuadrant) {
+          currentQuadrant = q;
+          updateBasketPos();
+        }
+      }
+
+      function handleTouch(e) {
+        e.preventDefault();
+        if (audioCtx?.state === "suspended") audioCtx.resume();
+        if (e.touches.length > 0) {
+          const touch = e.touches[0];
+          const rect = canvas.getBoundingClientRect();
+          const x = (touch.clientX - rect.left) * (width / rect.width);
+          const y = (touch.clientY - rect.top) * (height / rect.height);
+          let q = 0;
+          if (x < width / 2) {
+            q = y < height / 2 ? 0 : 2;
+          } else {
+            q = y < height / 2 ? 1 : 3;
+          }
+          setQuadrant(q);
+        }
+      }
+
+      function handleKey(e) {
+        e.preventDefault();
+        if (audioCtx?.state === "suspended") audioCtx.resume();
+        let newQ = currentQuadrant;
+        switch (e.key) {
+          case "ArrowLeft":
+            newQ = 0; // TL
+            break;
+          case "ArrowRight":
+            newQ = 1; // TR
+            break;
+          case "ArrowDown":
+            newQ = 2; // BL
+            break;
+          case "ArrowUp":
+            newQ = 3; // BR
+            break;
+        }
+        setQuadrant(newQ);
+      }
+
+      const playSound = (freq, dur = 0.1) => {
+        if (audioMuted || !audioCtx || audioCtx.state !== "running") return;
+        const osc = audioCtx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+      };
+
+      function spawnItem() {
+        // Четыре полки: слева сверху, слева снизу, справа сверху, справа снизу
+        const chutePositions = [
+            { x: width * 0.15, y: height * 0.3, vx: 2.5, vy: 2.5 },  // Левая верхняя
+            { x: width * 0.15, y: height * 0.7, vx: 2.5, vy: -2.5 }, // Левая нижняя
+            { x: width * 0.85, y: height * 0.3, vx: -2.5, vy: 2.5 }, // Правая верхняя
+            { x: width * 0.85, y: height * 0.7, vx: -2.5, vy: -2.5 } // Правая нижняя
+        ];
+
+        const chute = Math.floor(Math.random() * chutePositions.length);
+        const pos = chutePositions[chute];
+
+        items.push({
+            x: pos.x,
+            y: pos.y,
+            vx: pos.vx + (Math.random() - 0.5) * 0.3,
+            vy: pos.vy + (Math.random() - 0.5) * 0.3,
+            color: `hsl(${Math.random() * 360}, 70%, 60%)`,
+            r: 15,
+            chute
+        });
+        }
+    
+      function drawShelves() {
+        ctx.save();
+        ctx.fillStyle = "#6b4f2c";
+        ctx.shadowColor = "rgba(0,0,0,0.3)";
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetY = 2;
+
+        const shelfWidth = 100;
+        const shelfHeight = 10;
+        const tilt = 0.25; // угол наклона (~14°)
+        const sideOffset = 0.1; // чем больше — тем дальше полки от центра
+
+        // Левая верхняя — вниз к центру
+        ctx.save();
+        ctx.translate(width * sideOffset + shelfWidth / 2, height * 0.3 + shelfHeight / 2);
+        ctx.rotate(tilt);
+        ctx.fillRect(-shelfWidth / 2, -shelfHeight / 2, shelfWidth, shelfHeight);
+        ctx.restore();
+
+        // Левая нижняя — вниз к центру
+        ctx.save();
+        ctx.translate(width * sideOffset + shelfWidth / 2, height * 0.7 + shelfHeight / 2);
+        ctx.rotate(tilt);
+        ctx.fillRect(-shelfWidth / 2, -shelfHeight / 2, shelfWidth, shelfHeight);
+        ctx.restore();
+
+        // Правая верхняя — вниз к центру
+        ctx.save();
+        ctx.translate(width * (1 - sideOffset) - shelfWidth / 2, height * 0.3 + shelfHeight / 2);
+        ctx.rotate(-tilt);
+        ctx.fillRect(-shelfWidth / 2, -shelfHeight / 2, shelfWidth, shelfHeight);
+        ctx.restore();
+
+        // Правая нижняя — вниз к центру
+        ctx.save();
+        ctx.translate(width * (1 - sideOffset) - shelfWidth / 2, height * 0.7 + shelfHeight / 2);
+        ctx.rotate(-tilt);
+        ctx.fillRect(-shelfWidth / 2, -shelfHeight / 2, shelfWidth, shelfHeight);
+        ctx.restore();
+
+        ctx.restore();
+        }
+
+
+
+      function update() {
+        spawnTimer++;
+        const currentDelay = Math.max(30, 90 - Math.floor(score / 100) * 5);
+        if (spawnTimer >= currentDelay) {
+          spawnItem();
+          spawnTimer = 0;
+        }
+
+        for (let i = items.length - 1; i >= 0; i--) {
+          const item = items[i];
+          item.x += item.vx;
+          item.y += item.vy;
+
+          const dx = item.x - basketX;
+          const dy = item.y - basketY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const basketR = 40;
+
+          if (dist < basketR + item.r && currentQuadrant === item.chute) {
+            items.splice(i, 1);
+            score += 10 * (1 + Math.floor(streak / 5));
+            streak++;
+            glow = true;
+            window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
+            playSound(660, 0.15);
+            for (let j = 0; j < 5; j++) {
+              const a = (j / 5) * Math.PI * 2;
+              particles.push({
+                x: item.x,
+                y: item.y,
+                vx: Math.cos(a) * 4,
+                vy: Math.sin(a) * 4,
+                life: 30,
+                maxLife: 30,
+                color: item.color,
+              });
+            }
+            continue;
+          }
+
+          if (item.y > height + 50 || item.y < -50) {
+            items.splice(i, 1);
+            streak = 0;
+            missCount++;
+            lives = 3 - missCount;
+            shakeX = (Math.random() - 0.5) * 10;
+            shakeY = (Math.random() - 0.5) * 10;
+            shakeTimer = 10;
+            window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
+            playSound(392, 0.2);
+            if (lives <= 0) {
+              gameOver();
+              return;
+            }
+          }
+        }
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          p.life--;
+          if (p.life <= 0) particles.splice(i, 1);
+        }
+
+        if (shakeTimer > 0) {
+          shakeTimer--;
+          if (shakeTimer % 2 === 0) {
+            shakeX *= 0.8;
+            shakeY *= 0.8;
+          }
+          if (shakeTimer === 0) {
+            shakeX = 0;
+            shakeY = 0;
+          }
+        }
+        glow = false;
+      }
+
+      function render() {
+        ctx.fillStyle = "#B0E0E6";
+        ctx.fillRect(0, 0, width, height);
+
+        drawShelves();
+
+        // Chutes (visual)
+        ctx.fillStyle = "#808080";
+        const chuteWidth = 40,
+          chuteHeight = 80;
+        const leftX = width * 0.2,
+          rightX = width * 0.8;
+        // Top chutes
+        ctx.fillRect(leftX - 20, 0, chuteWidth, chuteHeight);
+        ctx.fillRect(rightX - 20, 0, chuteWidth, chuteHeight);
+        // Bottom chutes
+        ctx.fillRect(leftX - 20, height - chuteHeight, chuteWidth, chuteHeight);
+        ctx.fillRect(rightX - 20, height - chuteHeight, chuteWidth, chuteHeight);
+
+        // Items
+        items.forEach((item) => {
+          ctx.beginPath();
+          ctx.arc(item.x, item.y, item.r, 0, Math.PI * 2);
+          ctx.fillStyle = item.color;
+          ctx.fill();
+        });
+
+        // Particles
+        particles.forEach((p) => {
+          ctx.save();
+          ctx.globalAlpha = p.life / p.maxLife;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = p.color;
+          ctx.fill();
+          ctx.restore();
+        });
+
+        ctx.save();
+        ctx.translate(shakeX, shakeY);
+
+        // Penguin (fixed)
+        ctx.fillStyle = "white";
+        ctx.beginPath();
+        ctx.arc(px, py + 20, 60, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(px, py - 20, 40, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "black";
+        ctx.beginPath();
+        ctx.arc(px - 10, py - 25, 4, 0, Math.PI * 2);
+        ctx.arc(px + 10, py - 25, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "orange";
+        ctx.beginPath();
+        ctx.moveTo(px, py - 15);
+        ctx.lineTo(px - 15, py - 5);
+        ctx.lineTo(px + 15, py - 5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = "black";
+        ctx.beginPath();
+        ctx.ellipse(px - 20, py + 70, 15, 10, 0, 0, Math.PI * 2);
+        ctx.ellipse(px + 20, py + 70, 15, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Basket
+        const basketR = 40;
+        ctx.fillStyle = glow ? "yellow" : "brown";
+        ctx.strokeStyle = "black";
+        ctx.lineWidth = 2;
+        if (glow) {
+          ctx.shadowColor = "yellow";
+          ctx.shadowBlur = 15;
+        }
+        const bx = basketX,
+          by = basketY;
+        const bw = 80,
+          bh = 40;
+        drawRoundedRect(ctx, bx - bw / 2, by - bh / 2, bw, bh, 10);
+        ctx.fill();
+        ctx.stroke();
+        if (glow) ctx.shadowBlur = 0;
+
+        ctx.restore();
+
+        // UI
+        ctx.fillStyle = "black";
+        ctx.font = "bold 24px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(`Score: ${score}`, 20, 30);
+        ctx.textAlign = "right";
+        ctx.fillText(`Lives: ${lives}`, width - 20, 30);
+        ctx.textAlign = "center";
+      }
+
+      function drawRoundedRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+      }
+
+      function loop() {
+        update();
+        render();
+        requestAnimationFrame(loop);
+      }
+
+      function gameOver() {
+        window.FarcadeSDK.singlePlayer.actions.gameOver({ score });
+      }
+
+      function restart() {
+        score = 0;
+        lives = 3;
+        missCount = 0;
+        streak = 0;
+        items = [];
+        particles = [];
+        currentQuadrant = 0;
+        updateBasketPos();
+        spawnTimer = 0;
+        shakeX = shakeY = shakeTimer = 0;
+        glow = false;
+      }
+
+      init();
+    </script>
+  </body>
+</html>
