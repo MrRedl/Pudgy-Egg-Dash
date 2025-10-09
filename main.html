@@ -41,25 +41,245 @@
     </div>
     <script src="https://cdn.jsdelivr.net/npm/@farcade/game-sdk@0.2.1/dist/index.min.js"></script>
     <script>
+      let running = false; // новое состояние игрового цикла
+
       let canvas, ctx, width, height, dpr;
       let gameContainer;
       let score = 0,
-        lives = 3,
         streak = 0,
         missCount = 0;
       let items = [],
         particles = [];
+        let fragments = []; // здесь будут лежать разбитые кусочки
       let currentQuadrant = 0; // Start at top-left
       let basketX, basketY, px, py;
       let glow = false;
       let shakeX = 0,
         shakeY = 0,
         shakeTimer = 0;
+      let hasShownTutorial = false;     // показывали ли подсказку уже
+      let showingTutorial = false;      // сейчас отображается экран инструкции
+      let wasdImg = new Image();        // картинка с WASD (по желанию)
+      wasdImg.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/WASD-7JxoRLuLURUoT8GaWDSLDd4C4Hj0wi.png?a1fy";         // подставь свой URL/путь или оставь пусто
       let audioMuted = false;
       let audioCtx;
       let spawnTimer = 0;
+      let shelfHeight = 20;
+      let shelfWidth = 90;
+      let radius = 30;
+      let tilt = 0.25;
+      let animationId;
+      const quadrantMoves = [
+        { ArrowUp: 0, ArrowDown: 1, ArrowLeft: 0, ArrowRight: 2 }, // TL
+        { ArrowUp: 0, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 3 }, // BL
+        { ArrowUp: 2, ArrowDown: 3, ArrowLeft: 0, ArrowRight: 2 }, // TR
+        { ArrowUp: 2, ArrowDown: 3, ArrowLeft: 1, ArrowRight: 3 }  // BR
+      ];
+      const GROUND_OFFSET = 20; // на сколько пикселей «земля» выше низа канваса
+      const TOP_SHELF_Y = 0.45; // 0.4 — по умолчанию, 0.5 = пониже
+      const BOTTOM_SHELF_Y = 0.7; // можешь тоже регулировать при желании
+      function getCriticalY() {
+        return height - GROUND_OFFSET; // общая «земля» для пингвина и разбития яиц
+      }
+      let iceWall = new Image();
+      iceWall.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/back.png-DxOA749GCtXek8wuKLiQbhcm888JTr.png?cx2A";
+      
+      let penguinDefault = new Image();
+      penguinDefault.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/right_mid-cH4meD6W1kZ43DUpb6nTU1JyVXximf.png?qstG";
+      let penguinLeftUpTwo = new Image();
+      penguinLeftUpTwo.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/left_up_two-bGSWl8Lxewlx7VSpM1gMofjHOKOasQ.png?4T75";
+      let penguinLeftDownTwo = new Image();
+      penguinLeftDownTwo.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/left_down_two-Vg640RMlOoG2WtMyl3m9PNzkqzH08E.png?3SYo";
+      
+      
+      let penguinRightUp = new Image();
+      penguinRightUp.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/right_up-xFB5gbNF4zsEaVxpV3ICyH48uOzRuE.png?D4Pl";
+      let penguinRightDown = new Image();
+      penguinRightDown.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/right_down-uz1JPuKGVbbgXEcHRl8an7eIXjtzuM.png?jVtR";
+      let penguinLeftUp = new Image();
+      penguinLeftUp.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/left_up-qHPPANjt1arQuleSbkUUnvS06gfAyv.png?O8Rp";
+      let penguinLeftDown = new Image();
+      penguinLeftDown.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/left_down-dQ4iz71TUKPKcaVmwE5zVj3WXd74AR.png?lFQG";
+      let eggPink = new Image();
+      eggPink.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/pink_egg-0Dn9RrjxEknKJK0aIMmCvavXlS9Aj3.png?unlR";
+      let eggRed = new Image();
+      eggRed.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/red_egg-nyue5A2w4ydy6EpCqiIda76WDHg122.png?oEFV";
+      let eggYellow = new Image();
+      eggYellow.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/yellow_egg-Hb24PJjxNvcHaabDpZ5G0hiWXCmGxC.png?JCW1";
+      let eggColor = new Image();
+      eggColor.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/color_egg-wQwp2LT53bxB14W0P5VkoqX1vbosyW.png?uAXg";
+      let eggCom = new Image();
+      eggCom.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/com_egg-qwAneHN2FCrO2ZZ9ZZDbGE1WzMNNQs.png?1kVM";
+      let eggFake = new Image();
+      eggFake.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/fake_golden_egg-HHzNzHASDu3Olq9NZ9OVFDKvBmeLhm.png?jMrc";
+      let eggGold = new Image();
+      eggGold.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/golden_egg-imbPZnsWrr0bWT5JqVbeNZF3F09L76.png?4VMg";
+      let currentPenguin = new Image()
+      currentPenguin.src = penguinDefault.src
+      let heartFull = new Image();
+      heartFull.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/heart_full-VfreLKuyrpcpnnwwKkyGOIB9NvdO42.png?9MB5";
+
+      let heartEmpty = new Image();
+      heartEmpty.src = "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/dba04825-42ec-4ba6-b178-674e78e644da/heart_empty-c2y4uvwYg3qJ378Uhhj704zQPrgvRz.png?JxHa";
+      
+      let lives = 3;
+      const maxLives = 3;
+
+      const ITEM_SPRITES = [
+        { img: eggPink,   w: 35, h: 39, color: "#ff8cb5" },
+        { img: eggRed,    w: 35, h: 39, color: "#e57373" },
+        { img: eggYellow, w: 35, h: 39, color: "#ffd54f" },
+        { img: eggColor,  w: 35, h: 39, color: "#80deea" },
+        { img: eggCom,    w: 35, h: 39, color: "#b39ddb" },
+        { img: eggFake,   w: 35, h: 39, color: "#cfd8dc" },
+        { img: eggGold,   w: 35, h: 39, color: "#ffca28" },
+      ];
+
+      // --- оффсеты визуального центра (px) для твоих PNG ---
+      const poseOffset = new Map([
+        // дефолт по центру
+        [penguinDefault,   { ox: 0,   oy: 0 }],
+
+        // ВЕРХ
+        // "лево.png" = левая верхняя поза
+        [penguinLeftUp,    { ox:  33, oy: -2.5 }],
+        // right_up.png
+        [penguinRightUp,   { ox: -32, oy: -2.5 }],
+
+        // НИЗ
+        // left_down.png
+        [penguinLeftDown,  { ox:  3.5, oy:  0.5 }],
+        // right_down.png  (у тебя файл идентичен left_down, поэтому тоже 3.5)
+        [penguinRightDown, { ox:  3.5, oy:  0.5 }],
+      ]);
+
+      
+      const penguinWidth = 350;  // ширина картинки
+      const penguinHeight = 350; // высота картинки
+
+
+function isRightQuadrant() {
+  return currentQuadrant === 2 || currentQuadrant === 3;
+}
+
+function overlayForQuadrant() {
+  // как у вас: верхняя/нижняя поза
+  return (currentQuadrant === 0 || currentQuadrant === 2)
+    ? penguinLeftUpTwo
+    : penguinLeftDownTwo;
+}
+
+function drawImageMaybeMirrored(img, x, y, w, h) {
+  if (isRightQuadrant()) {
+    ctx.save();
+    ctx.translate(px * 2, 0); // зеркалим вокруг центра пингвина
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, x, y, w, h);
+    ctx.restore();
+  } else {
+    ctx.drawImage(img, x, y, w, h);
+  }
+}
+
+// ЗАДНИЙ СЛОЙ ПИНГВИНА (тушка)
+function drawPenguinBack() {
+  const drawX = Math.round(px - penguinWidth / 2);
+  const drawY = Math.round(py - penguinHeight / 2);
+
+  if (currentPenguin.complete) {
+    drawImageMaybeMirrored(currentPenguin, drawX, drawY, penguinWidth, penguinHeight);
+  } else {
+    // фолбэк
+    ctx.fillStyle = "#ccc";
+    ctx.beginPath();
+    ctx.arc(px, py, 40, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ПЕРЕДНИЙ СЛОЙ ПИНГВИНА (поверх всего, напр. руки/жест)
+function drawPenguinFront() {
+  const drawX = Math.round(px - penguinWidth / 2);
+  const drawY = Math.round(py - penguinHeight / 2);
+  const overlayImg = overlayForQuadrant();
+  drawImageMaybeMirrored(overlayImg, drawX, drawY, penguinWidth, penguinHeight);
+}
+
+
+function drawItemsList(list) {
+  list.forEach((item) => {
+    const { sprite, w, h } = item;
+
+    ctx.save();
+    ctx.translate(item.x, item.y);
+    ctx.rotate(item.onShelf ? (item.tilt + item.angle) : item.angle);
+
+    if (sprite && sprite.complete) {
+      ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
+    } else {
+      // fallback
+      ctx.beginPath();
+      ctx.ellipse(0, 0, (w || item.r) * 0.5, (h || item.r) * 0.6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.strokeStyle = "#000";
+      ctx.stroke();
+    }
+    ctx.restore();
+  });
+}
+
+function drawFragments() {
+  fragments.forEach(f => {
+    ctx.save();
+    ctx.globalAlpha = f.life / f.maxLife;
+    ctx.beginPath();
+    ctx.ellipse(f.x, f.y, f.r * 0.8, f.r, 0, 0, Math.PI * 2);
+    ctx.fillStyle = f.color;
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+function drawUI() {
+  ctx.fillStyle = "black";
+  ctx.font = "bold 24px Arial";
+  ctx.textAlign = "left";
+  ctx.fillText(`Score: ${score}`, 20, 30);
+
+  const heartSize = 32; // ширина/высота сердечка
+  const spacing = 8;    // отступ между сердечками
+  const totalWidth = maxLives * (heartSize + spacing) - spacing;
+
+  const startX = width - totalWidth - 20; // отступ от правого края
+  const y = 10; // отступ сверху
+
+  for (let i = 0; i < maxLives; i++) {
+    const img = i < lives ? heartFull : heartEmpty;
+    if (img.complete) {
+      ctx.drawImage(img, startX + i * (heartSize + spacing), y, heartSize, heartSize);
+    } else {
+      ctx.fillStyle = i < lives ? "red" : "gray";
+      ctx.fillRect(startX + i * (heartSize + spacing), y, heartSize, heartSize);
+    }
+  }
+}
+function handleMouseDown(e) {
+          // если открыт экран инструкции — закрываем и запускаем игру
+          if (showingTutorial) {
+            showingTutorial = false;
+            hasShownTutorial = true;
+            startLoop();
+            canvas.focus?.({ preventScroll: true });
+            return; // этот клик только для закрытия инструкции
+          }
+
+          // дальше можешь по желанию сделать что-то ещё при клике...
+        }
+
 
       function init() {
+        console.log("INIT STARTED");
         canvas = document.getElementById("canvas");
         ctx = canvas.getContext("2d");
         gameContainer = document.getElementById("gameContainer");
@@ -67,18 +287,41 @@
         window.addEventListener("resize", resize);
         window.addEventListener("orientationchange", () => setTimeout(resize, 100));
         canvas.addEventListener("touchstart", handleTouch, { passive: false });
+        canvas.addEventListener("mousedown", handleMouseDown);
         document.addEventListener("keydown", handleKey);
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         resize();
         px = width / 2;
-        py = height * 0.6;
-        updateBasketPos();
+        py = getCriticalY() - penguinHeight / 2;
+        
+        // Penguin (image
+
+
+        if (currentPenguin.complete) {
+          ctx.drawImage(currentPenguin, px - penguinWidth / 2, py - penguinHeight / 2, penguinWidth, penguinHeight);
+        } else {
+          // если изображение ещё не загрузилось — временно рисуем серый круг
+          ctx.fillStyle = "#ccc";
+          ctx.beginPath();
+          ctx.arc(px, py, 40, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        currentQuadrant = null;
+
+
         window.FarcadeSDK.on("play_again", restart);
         window.FarcadeSDK.on("toggle_mute", ({ isMuted }) => {
           audioMuted = isMuted;
         });
         window.FarcadeSDK.singlePlayer.actions.ready();
-        loop();
+        if (!hasShownTutorial) {
+          showingTutorial = true;
+          running = false;         // не запускаем игровой цикл
+          render();                // один раз нарисуем фон/сцены
+          drawTutorialOverlay();   // поверх покажем подсказку
+        } else {
+          startLoop();             // если уже показывали — сразу играем
+        }
       }
 
       function resize() {
@@ -93,22 +336,23 @@
         width = cw;
         height = ch;
         px = width / 2;
-        py = height * 0.6;
-        updateBasketPos();
+        py = getCriticalY() - penguinHeight / 2;
       }
 
       function updateBasketPos() {
-        // Позиции корзины (по бокам, над/под центром)
+        if (currentQuadrant == null) return;
         const offsets = [
-            { dx: -100, dy: -60 }, // Левая верхняя
-            { dx: -100, dy: 60 },  // Левая нижняя
-            { dx: 100, dy: -60 },  // Правая верхняя
-            { dx: 100, dy: 60 },   // Правая нижняя
+          { img: penguinLeftUp,  dx: -100, dy: -50 }, // Левая верхняя
+          { img: penguinLeftDown, dx: -100, dy: 95 }, // Левая нижняя
+          { img: penguinLeftUp,   dx: 100, dy: -50 }, // Правая верхняя
+          { img: penguinLeftDown, dx: 100, dy: 95 }  // Правая нижняя
         ];
         const off = offsets[currentQuadrant];
+        
+        currentPenguin = off.img;
         basketX = px + off.dx;
         basketY = py + off.dy;
-        }
+      }
 
       function setQuadrant(q) {
         if (q !== currentQuadrant) {
@@ -117,7 +361,69 @@
         }
       }
 
+      function playGameOver() {
+  if (audioMuted || !audioCtx || audioCtx.state !== "running") return;
+
+  const now = audioCtx.currentTime;
+
+  // мастер-гейн
+  const master = audioCtx.createGain();
+  master.gain.setValueAtTime(0.18, now);
+  master.gain.exponentialRampToValueAtTime(0.0008, now + 1.3);
+  master.connect(audioCtx.destination);
+
+  // мягкий lowpass-«вау» по мере затухания
+  const lp = audioCtx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(2200, now);
+  lp.frequency.exponentialRampToValueAtTime(350, now + 1.3);
+  lp.Q.value = 0.7;
+  lp.connect(master);
+
+  // основной нисходящий тон (saw → triangle смесь)
+  const osc1 = audioCtx.createOscillator();
+  osc1.type = "sawtooth";
+  osc1.frequency.setValueAtTime(440, now);              // A4
+  osc1.frequency.exponentialRampToValueAtTime(196, now + 1.1); // G3≈196
+  osc1.connect(lp);
+  osc1.start(now);
+  osc1.stop(now + 1.15);
+
+  const osc2 = audioCtx.createOscillator();
+  osc2.type = "triangle";
+  osc2.frequency.setValueAtTime(659.25, now + 0.02);              // E5
+  osc2.frequency.exponentialRampToValueAtTime(246.94, now + 1.1); // B3
+  osc2.connect(lp);
+  osc2.start(now + 0.02);
+  osc2.stop(now + 1.12);
+
+  // лёгкий «бум» в начале (низкочастотный щелчок/удар)
+  const thumpGain = audioCtx.createGain();
+  thumpGain.gain.setValueAtTime(0.22, now);
+  thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+  thumpGain.connect(master);
+
+  const thump = audioCtx.createOscillator();
+  thump.type = "sine";
+  thump.frequency.setValueAtTime(120, now);
+  thump.frequency.exponentialRampToValueAtTime(60, now + 0.18);
+  thump.connect(thumpGain);
+  thump.start(now);
+  thump.stop(now + 0.2);
+}
+
+
       function handleTouch(e) {
+        // если открыт экран инструкции — закрываем и запускаем игру
+  if (showingTutorial) {
+    showingTutorial = false;
+    hasShownTutorial = true;
+    startLoop();
+    return; // этот ввод только для закрытия экрана
+  }
+        if (!running) return;
+        if (currentQuadrant === null) {currentQuadrant = 0;
+          setQuadrant(1);}
         e.preventDefault();
         if (audioCtx?.state === "suspended") audioCtx.resume();
         if (e.touches.length > 0) {
@@ -127,33 +433,51 @@
           const y = (touch.clientY - rect.top) * (height / rect.height);
           let q = 0;
           if (x < width / 2) {
-            q = y < height / 2 ? 0 : 2;
+            q = y < (height*0.65) ? 0 : 1;
           } else {
-            q = y < height / 2 ? 1 : 3;
+            q = y < (height*0.65) ? 2 : 3;
           }
           setQuadrant(q);
         }
       }
 
       function handleKey(e) {
+        // если открыт экран инструкции — закрываем и запускаем игру
+  if (showingTutorial) {
+    showingTutorial = false;
+    hasShownTutorial = true;
+    startLoop();
+    return; // этот ввод только для закрытия экрана
+  }
+        if (!running) return;
+        if (currentQuadrant === null) {currentQuadrant = 0;
+          setQuadrant(1);}
         e.preventDefault();
         if (audioCtx?.state === "suspended") audioCtx.resume();
-        let newQ = currentQuadrant;
-        switch (e.key) {
-          case "ArrowLeft":
-            newQ = 0; // TL
-            break;
-          case "ArrowRight":
-            newQ = 1; // TR
-            break;
-          case "ArrowDown":
-            newQ = 2; // BL
-            break;
-          case "ArrowUp":
-            newQ = 3; // BR
-            break;
+
+        // сопоставляем WASD с направлениями
+        let keyMap = {
+          "ArrowUp": "ArrowUp",
+          "ArrowDown": "ArrowDown",
+          "ArrowLeft": "ArrowLeft",
+          "ArrowRight": "ArrowRight",
+          "w": "ArrowUp",
+          "s": "ArrowDown",
+          "a": "ArrowLeft",
+          "d": "ArrowRight",
+          "W": "ArrowUp",
+          "S": "ArrowDown",
+          "A": "ArrowLeft",
+          "D": "ArrowRight"
+        };
+
+        const mappedKey = keyMap[e.key];
+        if (!mappedKey) return;
+
+        const move = quadrantMoves[currentQuadrant][mappedKey];
+        if (move !== undefined) {
+          setQuadrant(move);
         }
-        setQuadrant(newQ);
       }
 
       const playSound = (freq, dur = 0.1) => {
@@ -169,30 +493,118 @@
         osc.start();
         osc.stop(audioCtx.currentTime + dur);
       };
+      function playEggBreak() {
+        if (audioMuted || !audioCtx || audioCtx.state !== "running") return;
+
+        const now = audioCtx.currentTime;
+
+        // === БУРСТ ШУМА (осколки) ===
+        const length = 0.15; // длительность шума, сек
+        const bufferSize = Math.floor(audioCtx.sampleRate * length);
+        const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          // короткий резкий шум (white noise)
+          data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 0.7);
+        }
+
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = noiseBuffer;
+
+        // Фильтры: делаем «стеклянные» высокие частоты
+        const hp = audioCtx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 1200;
+
+        const bp = audioCtx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = 3000; // «сверк» стекла
+        bp.Q.value = 1.2;
+
+        const noiseGain = audioCtx.createGain();
+        noiseGain.gain.setValueAtTime(0.28, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + length);
+
+        noise.connect(hp);
+        hp.connect(bp);
+        bp.connect(noiseGain);
+        noiseGain.connect(audioCtx.destination);
+
+        noise.start(now);
+        noise.stop(now + length);
+
+        // === СЕРИЯ «ТРЕСКОВ» (короткие щелчки) ===
+        // 3–4 крошечных удара с лёгким рандомом по частоте и времени
+        const cracks = 4;
+        for (let i = 0; i < cracks; i++) {
+          const t = now + 0.02 + i * 0.02 + Math.random() * 0.006;
+          const freqStart = 800 + Math.random() * 500; // старт частоты щелчка
+          const freqEnd = 200 + Math.random() * 200;
+
+          const osc = audioCtx.createOscillator();
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(freqStart, t);
+          osc.frequency.exponentialRampToValueAtTime(freqEnd, t + 0.07);
+
+          const g = audioCtx.createGain();
+          g.gain.setValueAtTime(0.2, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+
+          // лёгкий highpass, чтобы не было «бума»
+          const clickHP = audioCtx.createBiquadFilter();
+          clickHP.type = "highpass";
+          clickHP.frequency.value = 600;
+
+          osc.connect(clickHP);
+          clickHP.connect(g);
+          g.connect(audioCtx.destination);
+
+          osc.start(t);
+          osc.stop(t + 0.08);
+        }
+      }
+
 
       function spawnItem() {
         // Четыре полки: слева сверху, слева снизу, справа сверху, справа снизу
         const chutePositions = [
-            { x: width * 0.15, y: height * 0.3, vx: 2.5, vy: 2.5 },  // Левая верхняя
-            { x: width * 0.15, y: height * 0.7, vx: 2.5, vy: -2.5 }, // Левая нижняя
-            { x: width * 0.85, y: height * 0.3, vx: -2.5, vy: 2.5 }, // Правая верхняя
-            { x: width * 0.85, y: height * 0.7, vx: -2.5, vy: -2.5 } // Правая нижняя
+          { x: width * -0.05, y: height * TOP_SHELF_Y - Math.sin(0.25) * shelfWidth / 2 - radius/4, tilt: 0.25},          // Левая верхняя
+          { x: width * -0.05, y: height * 0.7 - Math.sin(0.25) * shelfWidth / 2 - radius/4, tilt: 0.25 },          // Левая нижняя
+          { x: width * 1.05,  y: height * TOP_SHELF_Y - Math.sin(0.25) * shelfWidth / 2 - radius/4, tilt: Math.PI-0.25},   // Правая верхняя
+          { x: width * 1.05,  y: height * 0.7 - Math.sin(0.25) * shelfWidth / 2 - radius/4, tilt: Math.PI-0.25 },  // Правая нижняя
         ];
 
         const chute = Math.floor(Math.random() * chutePositions.length);
         const pos = chutePositions[chute];
 
+        const baseSpeed = 2.5;
+        const speed = baseSpeed + score * 0.002;
+
+        // --- НОВОЕ: выбираем спрайт
+        const spr = ITEM_SPRITES[Math.floor(Math.random() * ITEM_SPRITES.length)];
+        // Зададим «радиус» для логики ловли ≈ половина ширины (можно подогнать)
+        const approxR = spr.h * 0.5;
+
         items.push({
-            x: pos.x,
-            y: pos.y,
-            vx: pos.vx + (Math.random() - 0.5) * 0.3,
-            vy: pos.vy + (Math.random() - 0.5) * 0.3,
-            color: `hsl(${Math.random() * 360}, 70%, 60%)`,
-            r: 15,
-            chute
+          x: pos.x,
+          y: pos.y,
+          vx: Math.cos(pos.tilt) * speed,
+          vy: Math.sin(pos.tilt) * speed,
+          r: approxR,
+          chute,
+          onShelf: true,
+          tilt: pos.tilt,
+          sprite: spr.img,
+          w: spr.w,
+          h: spr.h,
+
+          // НОВОЕ:
+          angle: 0,                  // текущий угол вращения (рад)
+          spinAir: (Math.random() - 0.5) * 0.04, // лёгкое вращение в полёте
+          baseColor: spr.color,
         });
-        }
-    
+      }
+
       function drawShelves() {
         ctx.save();
         ctx.fillStyle = "#6b4f2c";
@@ -200,244 +612,358 @@
         ctx.shadowBlur = 4;
         ctx.shadowOffsetY = 2;
 
-        const shelfWidth = 100;
-        const shelfHeight = 10;
-        const tilt = 0.25; // угол наклона (~14°)
-        const sideOffset = 0.1; // чем больше — тем дальше полки от центра
+        const tilt = 0.25; // угол наклона в радианах (~14°)
 
-        // Левая верхняя — вниз к центру
+        const offset = 0.05;
+
+        // Левая верхняя
         ctx.save();
-        ctx.translate(width * sideOffset + shelfWidth / 2, height * 0.3 + shelfHeight / 2);
+        // Левая верхняя
+        ctx.translate(-width * offset + shelfWidth / 2, height * TOP_SHELF_Y + shelfHeight / 2);
         ctx.rotate(tilt);
         ctx.fillRect(-shelfWidth / 2, -shelfHeight / 2, shelfWidth, shelfHeight);
         ctx.restore();
 
-        // Левая нижняя — вниз к центру
+        // Левая нижняя
         ctx.save();
-        ctx.translate(width * sideOffset + shelfWidth / 2, height * 0.7 + shelfHeight / 2);
+        ctx.translate(-width * offset + shelfWidth / 2, height * 0.7 + shelfHeight / 2);
         ctx.rotate(tilt);
         ctx.fillRect(-shelfWidth / 2, -shelfHeight / 2, shelfWidth, shelfHeight);
         ctx.restore();
 
-        // Правая верхняя — вниз к центру
+        // Правая верхняя
         ctx.save();
-        ctx.translate(width * (1 - sideOffset) - shelfWidth / 2, height * 0.3 + shelfHeight / 2);
+        ctx.translate(width + width * offset - shelfWidth / 2, height * TOP_SHELF_Y + shelfHeight / 2);
         ctx.rotate(-tilt);
         ctx.fillRect(-shelfWidth / 2, -shelfHeight / 2, shelfWidth, shelfHeight);
         ctx.restore();
 
-        // Правая нижняя — вниз к центру
+        // Правая нижняя
         ctx.save();
-        ctx.translate(width * (1 - sideOffset) - shelfWidth / 2, height * 0.7 + shelfHeight / 2);
+        ctx.translate(width + width * offset - shelfWidth / 2, height * 0.7 + shelfHeight / 2);
         ctx.rotate(-tilt);
         ctx.fillRect(-shelfWidth / 2, -shelfHeight / 2, shelfWidth, shelfHeight);
         ctx.restore();
 
         ctx.restore();
+      }
+
+      function drawEgg(x, y, r, color, cracked = false) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.ellipse(x, y, r * 0.8, r, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (cracked) {
+          ctx.strokeStyle = "black";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x - r / 2, y - r / 2);
+          ctx.lineTo(x + r / 3, y + r / 4);
+          ctx.moveTo(x - r / 4, y + r / 2);
+          ctx.lineTo(x + r / 2, y - r / 4);
+          ctx.stroke();
         }
-
-
+      }
 
       function update() {
         spawnTimer++;
-        const currentDelay = Math.max(30, 90 - Math.floor(score / 100) * 5);
+        const currentDelay = Math.max(30, 90 - Math.floor(score / 15) * 5);
         if (spawnTimer >= currentDelay) {
           spawnItem();
           spawnTimer = 0;
         }
 
-        for (let i = items.length - 1; i >= 0; i--) {
-          const item = items[i];
-          item.x += item.vx;
-          item.y += item.vy;
+        items.forEach((item, index) => {
+          if (item.onShelf) {
+            item.x += item.vx;
+            item.y += item.vy;
+            // скорость по модулю (пикс/кадр)
+            const v = Math.hypot(item.vx, item.vy);
+            // направление по оси X: вправо — положительное, влево — отрицательное
+            const dir = Math.sign(item.vx) || 1;
+            // «радиус» катящегося яйца — возьмём хитбокс r
+            const R = item.r || (item.w ? item.w/2 : 20);
 
-          const dx = item.x - basketX;
-          const dy = item.y - basketY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const basketR = 40;
+            // угол на кадр: омега ≈ v / R  (чуть приглушим коэффициентом)
+            item.angle += dir * (v / R) * 0.6;
+            // проверяем конец полки
+            // было: предмет докатился до края полки
+            if ((item.chute === 0 && item.x > shelfWidth * Math.cos(tilt)) ||
+                (item.chute === 1 && item.x > shelfWidth * Math.cos(tilt)) ||
+                (item.chute === 2 && item.x < width - shelfWidth * Math.cos(tilt)) ||
+                (item.chute === 3 && item.x < width - shelfWidth * Math.cos(tilt))) {
 
-          if (dist < basketR + item.r && currentQuadrant === item.chute) {
-            items.splice(i, 1);
-            score += 10 * (1 + Math.floor(streak / 5));
-            streak++;
-            glow = true;
-            window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
-            playSound(660, 0.15);
-            for (let j = 0; j < 5; j++) {
-              const a = (j / 5) * Math.PI * 2;
-              particles.push({
-                x: item.x,
-                y: item.y,
-                vx: Math.cos(a) * 4,
-                vy: Math.sin(a) * 4,
-                life: 30,
-                maxLife: 30,
-                color: item.color,
-              });
+              // 1) сохранить визуальный угол (наклон полки + накопленное вращение)
+              item.angle += item.tilt;   // теперь render в воздухе (rotate(item.angle)) начнётся с того же положения
+
+              // 2) (опционально) сохранить угловую скорость из «катится без проскальзывания»
+              const v = Math.hypot(item.vx, item.vy);
+              const dir = Math.sign(item.vx) || 1;
+              const R = item.r || (item.w ? item.w/2 : 20);
+              item.spinAir = dir * (v / R) * 0.6; // тот же коэффициент, что и на полке
+
+              item.onShelf = false; // теперь падает
             }
-            continue;
-          }
+          } else {
+            // гравитация и перемещение уже есть
+            item.vy += 0.3;
+            item.x += item.vx;
+            item.y += item.vy;
 
-          if (item.y > height + 50 || item.y < -50) {
-            items.splice(i, 1);
-            streak = 0;
-            missCount++;
-            lives = 3 - missCount;
-            shakeX = (Math.random() - 0.5) * 10;
-            shakeY = (Math.random() - 0.5) * 10;
-            shakeTimer = 10;
-            window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
-            playSound(392, 0.2);
-            if (lives <= 0) {
-              gameOver();
-              return;
+            // лёгкое вращение в полёте
+            item.angle += item.spinAir;
+
+            const catchMarginY = 20; // по вертикали
+
+            if (
+                Math.abs(item.y - basketY) < catchMarginY &&
+                currentQuadrant === item.chute
+              ) {
+                // яйцо поймано
+                const isGold = item.baseColor === "#ffca28"; // проверяем по цвету
+                score += isGold ? 5 : 1;
+                streak++;
+                glow = true;
+                playSound(isGold ? 800 : 500, 0.1);
+                items.splice(index, 1);
+              }
+
+
+                // проверка падения ниже критической линии
+            const criticalY = getCriticalY();
+            if (item.y > criticalY) {
+              playEggBreak();
+              // создаём 2-3 фрагмента
+              const numFragments = 2 + Math.floor(Math.random() * 2); // 2 или 3
+              for (let i = 0; i < numFragments; i++) {
+                fragments.push({
+                  x: item.x + (Math.random() - 0.5) * 20, // немного смещаем по X
+                  y: criticalY + (Math.random() - 0.5) * 10, // немного смещаем по Y
+                  r: item.r / numFragments, // меньше размер
+                  color: item.baseColor, // цвет от спрайта,
+                  life: 60,       // начальная жизнь (кол-во кадров)
+                  maxLife: 60     // для визуальной прозрачности
+                });
+              }
+
+              items.splice(index, 1); // убираем яйцо
+              lives--; // теряем жизнь
+              shakeX = (Math.random() - 0.5) * 10;
+              shakeY = (Math.random() - 0.5) * 10;
+              shakeTimer = 10;
+              playSound(100, 0.2);
             }
           }
-        }
+        });
 
-        for (let i = particles.length - 1; i >= 0; i--) {
-          const p = particles[i];
-          p.x += p.vx;
-          p.y += p.vy;
-          p.life--;
-          if (p.life <= 0) particles.splice(i, 1);
+      if (shakeTimer > 0) {
+        shakeTimer--;
+        if (shakeTimer % 2 === 0) {
+          shakeX *= 0.8;
+          shakeY *= 0.8;
         }
-
-        if (shakeTimer > 0) {
-          shakeTimer--;
-          if (shakeTimer % 2 === 0) {
-            shakeX *= 0.8;
-            shakeY *= 0.8;
-          }
-          if (shakeTimer === 0) {
-            shakeX = 0;
-            shakeY = 0;
-          }
+        if (shakeTimer === 0) {
+          shakeX = 0;
+          shakeY = 0;
         }
-        glow = false;
       }
 
-      function render() {
-        ctx.fillStyle = "#B0E0E6";
-        ctx.fillRect(0, 0, width, height);
-
-        drawShelves();
-
-        // Chutes (visual)
-        ctx.fillStyle = "#808080";
-        const chuteWidth = 40,
-          chuteHeight = 80;
-        const leftX = width * 0.2,
-          rightX = width * 0.8;
-        // Top chutes
-        ctx.fillRect(leftX - 20, 0, chuteWidth, chuteHeight);
-        ctx.fillRect(rightX - 20, 0, chuteWidth, chuteHeight);
-        // Bottom chutes
-        ctx.fillRect(leftX - 20, height - chuteHeight, chuteWidth, chuteHeight);
-        ctx.fillRect(rightX - 20, height - chuteHeight, chuteWidth, chuteHeight);
-
-        // Items
-        items.forEach((item) => {
-          ctx.beginPath();
-          ctx.arc(item.x, item.y, item.r, 0, Math.PI * 2);
-          ctx.fillStyle = item.color;
-          ctx.fill();
-        });
-
-        // Particles
-        particles.forEach((p) => {
-          ctx.save();
-          ctx.globalAlpha = p.life / p.maxLife;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-          ctx.fillStyle = p.color;
-          ctx.fill();
-          ctx.restore();
-        });
-
-        ctx.save();
-        ctx.translate(shakeX, shakeY);
-
-        // Penguin (fixed)
-        ctx.fillStyle = "white";
-        ctx.beginPath();
-        ctx.arc(px, py + 20, 60, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(px, py - 20, 40, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "black";
-        ctx.beginPath();
-        ctx.arc(px - 10, py - 25, 4, 0, Math.PI * 2);
-        ctx.arc(px + 10, py - 25, 4, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "orange";
-        ctx.beginPath();
-        ctx.moveTo(px, py - 15);
-        ctx.lineTo(px - 15, py - 5);
-        ctx.lineTo(px + 15, py - 5);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.fillStyle = "black";
-        ctx.beginPath();
-        ctx.ellipse(px - 20, py + 70, 15, 10, 0, 0, Math.PI * 2);
-        ctx.ellipse(px + 20, py + 70, 15, 10, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Basket
-        const basketR = 40;
-        ctx.fillStyle = glow ? "yellow" : "brown";
-        ctx.strokeStyle = "black";
-        ctx.lineWidth = 2;
-        if (glow) {
-          ctx.shadowColor = "yellow";
-          ctx.shadowBlur = 15;
+      // уменьшаем жизнь частиц
+      for (let i = fragments.length - 1; i >= 0; i--) {
+        const f = fragments[i];
+        f.life--; // уменьшаем жизнь
+        if (f.life <= 0) {
+          fragments.splice(i, 1); // удаляем фрагмент
         }
-        const bx = basketX,
-          by = basketY;
-        const bw = 80,
-          bh = 40;
-        drawRoundedRect(ctx, bx - bw / 2, by - bh / 2, bw, bh, 10);
-        ctx.fill();
+      }
+      
+      // проверка конца игры
+      if (lives <= 0) {
+        gameOver();
+      }
+      glow = false;
+      }
+      function debugCenter() {
+        ctx.strokeStyle = '#000';
+        ctx.beginPath();
+        ctx.moveTo(px-10, py); ctx.lineTo(px+10, py);
+        ctx.moveTo(px, py-10); ctx.lineTo(px, py+10);
         ctx.stroke();
-        if (glow) ctx.shadowBlur = 0;
-
-        ctx.restore();
-
-        // UI
-        ctx.fillStyle = "black";
-        ctx.font = "bold 24px Arial";
-        ctx.textAlign = "left";
-        ctx.fillText(`Score: ${score}`, 20, 30);
-        ctx.textAlign = "right";
-        ctx.fillText(`Lives: ${lives}`, width - 20, 30);
-        ctx.textAlign = "center";
       }
 
-      function drawRoundedRect(ctx, x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        ctx.lineTo(x + r, y + h);
-        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-      }
+      // Порог, после которого яйца рисуются поверх пингвина
+const EGGS_FRONT_SCORE = 300;
+const EGGS_FRONT_Y_FRAC = 0.60; // 0.0 (верх) ... 1.0 (низ). Порог ~60% высоты
 
-      function loop() {
-        update();
-        render();
-        requestAnimationFrame(loop);
-      }
+function frontThresholdY() {
+  return height * EGGS_FRONT_Y_FRAC;
+}
+
+function drawTutorialOverlay() {
+  // полупрозрачная подложка
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(0, 0, width, height);
+
+  // карточка
+  const cardW = Math.min(420, width * 0.9);
+  const cardH = Math.min(420, height * 0.85);
+  const cardX = (width - cardW) / 2;
+  const cardY = (height - cardH) / 2;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 16);
+  ctx.fill();
+  ctx.stroke();
+
+  // заголовок
+  ctx.fillStyle = "#111";
+  ctx.font = "bold 24px Segoe UI";
+  ctx.textAlign = "center";
+  ctx.fillText("How to Play", width / 2, cardY + 40);
+
+  // текст
+  ctx.font = "16px Segoe UI";
+  ctx.fillStyle = "#333";
+  const line1 = "Use keys or tap the screen";
+  const line2 = "Catch the eggs - earn points!";
+  ctx.fillText(line1, width / 2, cardY + 80);
+  ctx.fillText(line2, width / 2, cardY + 110);
+
+  // рисунок WASD (если есть)
+  const imgSize = Math.min(180, cardW * 0.6);
+  const imgX = width / 2 - imgSize / 2;
+  const imgY = cardY + 160;
+  if (wasdImg.complete && wasdImg.naturalWidth) {
+    ctx.drawImage(wasdImg, imgX, imgY, imgSize, imgSize);
+  } else {
+    // простой псевдо-WASD, если картинки нет
+    ctx.fillStyle = "#eee";
+    ctx.strokeStyle = "#444";
+    ctx.lineWidth = 2;
+    const k = 50, gap = 12;
+    const cx = width / 2, cy = imgY + imgSize / 2;
+    const keys = [
+      {x: cx - k/2, y: cy - k - gap, label: "W"},
+      {x: cx - k - gap - k/2, y: cy, label: "A"},
+      {x: cx - k/2, y: cy, label: "S"},
+      {x: cx + k + gap - k/2, y: cy, label: "D"},
+    ];
+    keys.forEach(key => {
+      ctx.fillStyle = "#fafafa";
+      ctx.beginPath(); ctx.roundRect(key.x, key.y, k, k, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#111";
+      ctx.font = "bold 22px Segoe UI";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(key.label, key.x + k/2, key.y + k/2);
+    });
+  }
+
+  // «нажмите…»
+  ctx.font = "16px Roboto";
+  ctx.fillStyle = "#666";
+  ctx.fillText("Press any key or tap to start", width / 2, cardY + cardH - 24);
+
+  ctx.restore();
+}
+
+
+function render() {
+  // фон
+  if (iceWall.complete) {
+      ctx.drawImage(iceWall, 0, 0, width, height);
+    } else {
+      ctx.fillStyle = "#B0E0E6";
+      ctx.fillRect(0, 0, width, height);
+    }
+
+  // задник
+  
+
+  // (примеры группировки яиц)
+  const thresholdY1 = height * 0.70; // можете заменить на свою функцию
+  const eggsBehind = [];
+  const eggsFront  = [];
+  for (const it of items) {
+    if ((it.y < thresholdY1) && ((it.chute == 0) || (it.chute == 2))) eggsBehind.push(it);
+    else if (((it.chute == 1) || (it.chute == 3))) eggsBehind.push(it);
+    else eggsFront.push(it);
+  }
+
+  // ЯЙЦА ПОЗАДИ ПИНГВИНА
+
+
+  // ПИНГВИН — ЗАДНИЙ СЛОЙ (поднимаем shake тут, если нужен)
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+  drawPenguinBack();
+
+  drawItemsList(eggsBehind);
+  
+
+  // ПИНГВИН — ПЕРЕДНИЙ СЛОЙ
+  
+  if (currentQuadrant !== null) {
+    drawPenguinFront(); // ← рисуем руки/жест только если пингвин "занял позицию"
+  }
+  ctx.restore();
+  drawItemsList(eggsFront);
+
+  // ЯЙЦА ПОВЕРХ ПИНГВИНА
+  drawShelves();
+
+  // ЭФФЕКТЫ/ОСКОЛКИ/ИНТЕФЕЙС
+  drawFragments();
+  drawUI();
+  debugCenter();
+  if (showingTutorial) {
+  drawTutorialOverlay();
+}
+}
+
+      const STEP = 1000 / 60; // 16.6667 ms
+let last = 0;
+let acc = 0;
+
+function loop(now) {
+  if (!running) return;
+  if (!last) last = now;
+
+  acc += now - last;
+  last = now;
+
+  // Выполняем ЛОГИКУ кратно фиксированному шагу
+  // (0, 1 или 2 раза за кадр — но всегда «кадрами»)
+  while (acc >= STEP) {
+    update();   // ← ваша текущая update() без каких-либо delta
+    acc -= STEP;
+  }
+
+  render();     // рисуем столько, сколько дисплей хочет
+  animationId = requestAnimationFrame(loop);
+}
+
+function startLoop() {
+  if (running) return;
+  running = true;
+  last = 0; acc = 0;
+  animationId = requestAnimationFrame(loop);
+}
+
+function stopLoop() {
+  running = false;
+  if (animationId) cancelAnimationFrame(animationId);
+  animationId = null;
+}
 
       function gameOver() {
+        playGameOver();
+        stopLoop();
         window.FarcadeSDK.singlePlayer.actions.gameOver({ score });
       }
 
@@ -448,11 +974,13 @@
         streak = 0;
         items = [];
         particles = [];
-        currentQuadrant = 0;
-        updateBasketPos();
         spawnTimer = 0;
         shakeX = shakeY = shakeTimer = 0;
         glow = false;
+
+        gameover = false; // <-- запускаем игру заново
+        last = 0; acc = 0;
+  startLoop();
       }
 
       init();
